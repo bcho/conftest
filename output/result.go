@@ -1,12 +1,17 @@
 package output
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/open-policy-agent/opa/ast"
+)
 
 // Result describes the result of a single rule evaluation.
 type Result struct {
 	Message  string                 `json:"msg"`
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 	Outputs  []string               `json:"outputs,omitempty"`
+	Query    string                 `json:"query,omitempty"`
 }
 
 // NewResult creates a new result. An error is returned if the
@@ -57,6 +62,9 @@ type QueryResult struct {
 	// Output represents anything print()'ed during the query
 	// evaluation. Each value is a print() call's result.
 	Outputs []string `json:"outputs,omitempty"`
+
+	// RuleLocation is the location of the query rule in the rego source.
+	RuleLocation *ast.Location `json:"rule_location,omitempty"`
 }
 
 // Passed returns true if all of the results in the query

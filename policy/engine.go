@@ -252,7 +252,7 @@ func (e *Engine) check(ctx context.Context, path string, config interface{}, nam
 		return output.CheckResult{}, fmt.Errorf("add file info: %w", err)
 	}
 
-	var rules []string
+	var rules []*ast.Rule
 	var ruleCount int
 	for _, module := range e.Modules() {
 		currentNamespace := strings.Replace(module.Package.Path.String(), "data.", "", 1)
@@ -264,9 +264,10 @@ func (e *Engine) check(ctx context.Context, path string, config interface{}, nam
 		// In order to validate the inputs against the policies, these rules need to be identified and how often
 		// they appear in the policies.
 		for r := range module.Rules {
-			currentRule := module.Rules[r].Head.Name.String()
+			currentRule := module.Rules[r]
+			ruleString := currentRule.Head.Name.String()
 
-			if !isFailure(currentRule) && !isWarning(currentRule) {
+			if !isFailure(ruleString) && !isWarning(ruleString) {
 				continue
 			}
 
@@ -277,7 +278,7 @@ func (e *Engine) check(ctx context.Context, path string, config interface{}, nam
 			// of rules will only contain deny, but the rule count would be two.
 			ruleCount++
 
-			if !contains(rules, currentRule) {
+			if !containsRule(rules, currentRule) {
 				rules = append(rules, currentRule)
 			}
 		}
@@ -289,10 +290,11 @@ func (e *Engine) check(ctx context.Context, path string, config interface{}, nam
 	}
 	var successes int
 	for _, rule := range rules {
+		ruleString := rule.Head.Name.String()
 
 		// When matching rules for exceptions, only the name of the rule
 		// is queried, so the severity prefix must be removed.
-		exceptionQuery := fmt.Sprintf("data.%s.exception[_][_] == %q", namespace, removeRulePrefix(rule))
+		exceptionQuery := fmt.Sprintf("data.%s.exception[_][_] == %q", namespace, removeRulePrefix(ruleString))
 
 		exceptionQueryResult, err := e.query(ctx, config, exceptionQuery)
 		if err != nil {
@@ -304,18 +306,19 @@ func (e *Engine) check(ctx context.Context, path string, config interface{}, nam
 
 			// When an exception is found, set the message of the exception
 			// to the query that triggered the exception so that it is known
-			// which exception was trigged.
+			// which exception was triggered.
 			if exceptionResult.Passed() {
 				exceptionResult.Message = exceptionQuery
 				exceptions = append(exceptions, exceptionResult)
 			}
 		}
 
-		ruleQuery := fmt.Sprintf("data.%s.%s", namespace, rule)
+		ruleQuery := fmt.Sprintf("data.%s.%s", namespace, ruleString)
 		ruleQueryResult, err := e.query(ctx, config, ruleQuery)
 		if err != nil {
 			return output.CheckResult{}, fmt.Errorf("query rule: %w", err)
 		}
+		ruleQueryResult.RuleLocation = rule.Location
 
 		var failures []output.Result
 		var warnings []output.Result
@@ -332,7 +335,7 @@ func (e *Engine) check(ctx context.Context, path string, config interface{}, nam
 				continue
 			}
 
-			if isFailure(rule) {
+			if isFailure(ruleString) {
 				failures = append(failures, ruleResult)
 			} else {
 				warnings = append(warnings, ruleResult)
@@ -453,6 +456,7 @@ func (e *Engine) query(ctx context.Context, input interface{}, query string) (ou
 				case string:
 					result := output.Result{
 						Message: val,
+						Query:   query,
 					}
 					results = append(results, result)
 
@@ -462,6 +466,7 @@ func (e *Engine) query(ctx context.Context, input interface{}, query string) (ou
 					if err != nil {
 						return output.QueryResult{}, fmt.Errorf("new result: %w", err)
 					}
+					result.Query = query
 
 					results = append(results, result)
 				}
@@ -492,6 +497,16 @@ func isFailure(rule string) bool {
 func contains(collection []string, item string) bool {
 	for _, value := range collection {
 		if strings.EqualFold(value, item) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func containsRule(coll []*ast.Rule, item *ast.Rule) bool {
+	for _, value := range coll {
+		if value.Equal(item) {
 			return true
 		}
 	}
